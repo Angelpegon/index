@@ -256,58 +256,62 @@
             cursor: pointer
         }
 
-        .player-play {
+        .player-fs {
             position: absolute;
-            inset: 0;
-            z-index: 2;
-            display: grid;
-            place-items: center;
+            right: 12px;
+            bottom: 12px;
+            z-index: 3;
+            width: 44px;
+            height: 44px;
             margin: 0;
             padding: 0;
-            border: 0;
-            background: transparent;
-            cursor: pointer
-        }
-
-        .player-play[hidden] {
-            display: none !important
-        }
-
-        .player-play__icon {
-            width: 72px;
-            height: 72px;
+            border: 2px solid var(--gold);
             border-radius: 999px;
             background: var(--green);
-            border: 3px solid var(--gold);
-            box-shadow: 0 10px 28px rgba(15, 58, 34, .35);
+            color: var(--cream);
+            cursor: pointer;
             display: grid;
             place-items: center;
-            transition: transform .15s ease, background .15s ease
+            box-shadow: 0 8px 20px rgba(15, 58, 34, .3);
+            transition: background .2s ease, transform .15s ease, box-shadow .2s ease
         }
 
-        .player-play__icon::before {
-            content: "";
-            width: 0;
-            height: 0;
-            margin-left: 4px;
-            border-style: solid;
-            border-width: 12px 0 12px 20px;
-            border-color: transparent transparent transparent var(--cream)
-        }
-
-        .player-play:hover .player-play__icon,
-        .player-play:focus-visible .player-play__icon {
+        .player-fs:hover {
             background: #164f30;
-            transform: scale(1.05)
+            box-shadow: 0 0 0 3px rgba(241, 217, 143, .55)
         }
 
-        .player-play:focus-visible {
-            outline: none
+        .player-fs:active {
+            transform: translateY(1px)
         }
 
-        .player-play:focus-visible .player-play__icon {
+        .player-fs:focus-visible {
             outline: 3px solid var(--gold);
-            outline-offset: 3px
+            outline-offset: 2px
+        }
+
+        .player-fs svg {
+            width: 20px;
+            height: 20px;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round
+        }
+
+        .player-frame:fullscreen,
+        .player-frame:-webkit-full-screen {
+            width: 100%;
+            height: 100%;
+            aspect-ratio: auto;
+            border-radius: 0;
+            background: #000
+        }
+
+        .player-frame:fullscreen video,
+        .player-frame:-webkit-full-screen video {
+            object-fit: contain
         }
 
         .player-fallback {
@@ -355,7 +359,7 @@
             .player-overlay,
             .player-panel,
             .player-close,
-            .player-play__icon {
+            .player-fs {
                 transition: none
             }
 
@@ -394,8 +398,10 @@
             </div>
             <div class="player-frame">
                 <video id="player-video" playsinline preload="metadata"></video>
-                <button type="button" class="player-play" id="player-play" hidden aria-label="Reproducir">
-                    <span class="player-play__icon" aria-hidden="true"></span>
+                <button type="button" class="player-fs" id="player-fs" aria-label="Pantalla completa">
+                    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                        <path d="M8 3H4v4M16 3h4v4M8 21H4v-4M16 21h4v-4" />
+                    </svg>
                 </button>
                 <div class="player-fallback" id="player-fallback" hidden>
                     <p>No se pudo cargar el video.</p>
@@ -431,40 +437,58 @@
         const overlay = document.getElementById('player-overlay');
         const titleEl = document.getElementById('player-title');
         const videoEl = document.getElementById('player-video');
-        const playBtn = document.getElementById('player-play');
+        const frameBox = document.querySelector('.player-frame');
+        const fsBtn = document.getElementById('player-fs');
         const fallback = document.getElementById('player-fallback');
         const closeBtn = document.getElementById('player-close');
         let toastTimer;
         let lastFocus = null;
 
-        function syncPlayUi() {
-            const show = videoEl.paused || videoEl.ended;
-            playBtn.hidden = !show;
-            playBtn.setAttribute("aria-label", show ? "Reproducir" : "Pausar");
-        }
-
         function stopVideo() {
+            if (document.fullscreenElement) {
+                document.exitFullscreen().catch(() => {});
+            }
             videoEl.pause();
             videoEl.removeAttribute("src");
             videoEl.load();
-            playBtn.hidden = true;
         }
 
         function togglePlay() {
             if (!videoEl.src && !videoEl.currentSrc) return;
             if (videoEl.paused || videoEl.ended) {
                 const p = videoEl.play();
-                if (p && typeof p.catch === "function") p.catch(() => syncPlayUi());
+                if (p && typeof p.catch === "function") p.catch(() => {});
             } else {
                 videoEl.pause();
             }
-            syncPlayUi();
+        }
+
+        function isFullscreen() {
+            return document.fullscreenElement === frameBox || document.webkitFullscreenElement === frameBox;
+        }
+
+        function syncFsUi() {
+            const on = isFullscreen();
+            fsBtn.setAttribute("aria-label", on ? "Salir de pantalla completa" : "Pantalla completa");
+            fsBtn.setAttribute("aria-pressed", on ? "true" : "false");
+        }
+
+        function toggleFullscreen(e) {
+            if (e) e.stopPropagation();
+            if (!document.fullscreenEnabled && !document.webkitFullscreenEnabled) return;
+            if (isFullscreen()) {
+                const exit = document.exitFullscreen || document.webkitExitFullscreen;
+                if (exit) exit.call(document);
+            } else {
+                const req = frameBox.requestFullscreen || frameBox.webkitRequestFullscreen;
+                if (req) req.call(frameBox);
+            }
         }
 
         function showFallback() {
             stopVideo();
             videoEl.style.display = "none";
-            playBtn.hidden = true;
+            fsBtn.hidden = true;
             fallback.hidden = false;
             fallback.classList.add("is-visible");
         }
@@ -473,6 +497,7 @@
             fallback.classList.remove("is-visible");
             fallback.hidden = true;
             videoEl.style.display = "block";
+            fsBtn.hidden = false;
         }
 
         function openPlayer(key, trigger) {
@@ -488,14 +513,10 @@
             hideFallback();
             videoEl.setAttribute("aria-label", video.title);
             videoEl.src = video.src;
-            playBtn.hidden = true;
+            syncFsUi();
             const play = () => {
                 const p = videoEl.play();
-                if (p && typeof p.catch === "function") {
-                    p.then(syncPlayUi).catch(() => syncPlayUi());
-                } else {
-                    syncPlayUi();
-                }
+                if (p && typeof p.catch === "function") p.catch(() => {});
             };
             videoEl.addEventListener("loadeddata", play, { once: true });
             videoEl.addEventListener("error", () => showFallback(), { once: true });
@@ -525,13 +546,9 @@
         }
 
         videoEl.addEventListener("click", togglePlay);
-        playBtn.addEventListener("click", e => {
-            e.stopPropagation();
-            togglePlay();
-        });
-        videoEl.addEventListener("play", syncPlayUi);
-        videoEl.addEventListener("pause", syncPlayUi);
-        videoEl.addEventListener("ended", syncPlayUi);
+        fsBtn.addEventListener("click", toggleFullscreen);
+        document.addEventListener("fullscreenchange", syncFsUi);
+        document.addEventListener("webkitfullscreenchange", syncFsUi);
 
         document.querySelectorAll('.hot[data-key]').forEach(a => {
             const key = a.dataset.key;
