@@ -314,6 +314,44 @@
             object-fit: contain
         }
 
+        .player-play {
+            position: absolute;
+            inset: 0;
+            z-index: 2;
+            display: none;
+            place-items: center;
+            margin: 0;
+            padding: 0;
+            border: 0;
+            background: rgba(15, 58, 34, .28);
+            cursor: pointer
+        }
+
+        .player-play.is-visible {
+            display: grid
+        }
+
+        .player-play__icon {
+            width: 72px;
+            height: 72px;
+            border-radius: 999px;
+            background: var(--green);
+            border: 3px solid var(--gold);
+            box-shadow: 0 10px 28px rgba(15, 58, 34, .35);
+            display: grid;
+            place-items: center
+        }
+
+        .player-play__icon::before {
+            content: "";
+            width: 0;
+            height: 0;
+            margin-left: 4px;
+            border-style: solid;
+            border-width: 12px 0 12px 20px;
+            border-color: transparent transparent transparent var(--cream)
+        }
+
         .player-fallback {
             position: absolute;
             inset: 0;
@@ -397,7 +435,10 @@
                 <button type="button" class="player-close" id="player-close" aria-label="Cerrar video">&times;</button>
             </div>
             <div class="player-frame">
-                <video id="player-video" playsinline preload="metadata"></video>
+                <video id="player-video" playsinline webkit-playsinline preload="auto"></video>
+                <button type="button" class="player-play" id="player-play" aria-label="Reproducir" hidden>
+                    <span class="player-play__icon" aria-hidden="true"></span>
+                </button>
                 <button type="button" class="player-fs" id="player-fs" aria-label="Pantalla completa">
                     <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
                         <path d="M8 3H4v4M16 3h4v4M8 21H4v-4M16 21h4v-4" />
@@ -438,26 +479,49 @@
         const titleEl = document.getElementById('player-title');
         const videoEl = document.getElementById('player-video');
         const frameBox = document.querySelector('.player-frame');
+        const playBtn = document.getElementById('player-play');
         const fsBtn = document.getElementById('player-fs');
         const fallback = document.getElementById('player-fallback');
         const closeBtn = document.getElementById('player-close');
         let toastTimer;
         let lastFocus = null;
 
+        function showPlayBtn(show) {
+            playBtn.hidden = !show;
+            playBtn.classList.toggle("is-visible", !!show);
+        }
+
         function stopVideo() {
-            if (document.fullscreenElement) {
-                document.exitFullscreen().catch(() => {});
+            if (document.fullscreenElement || document.webkitFullscreenElement) {
+                const exit = document.exitFullscreen || document.webkitExitFullscreen;
+                if (exit) {
+                    try { exit.call(document); } catch (e) {}
+                }
             }
             videoEl.pause();
             videoEl.removeAttribute("src");
             videoEl.load();
+            showPlayBtn(false);
+        }
+
+        function tryPlay() {
+            if (!videoEl.src && !videoEl.currentSrc) return Promise.resolve();
+            const p = videoEl.play();
+            if (p && typeof p.then === "function") {
+                return p.then(() => {
+                    showPlayBtn(false);
+                }).catch(() => {
+                    showPlayBtn(true);
+                });
+            }
+            showPlayBtn(videoEl.paused);
+            return Promise.resolve();
         }
 
         function togglePlay() {
             if (!videoEl.src && !videoEl.currentSrc) return;
             if (videoEl.paused || videoEl.ended) {
-                const p = videoEl.play();
-                if (p && typeof p.catch === "function") p.catch(() => {});
+                tryPlay();
             } else {
                 videoEl.pause();
             }
@@ -511,20 +575,21 @@
             lastFocus = trigger || document.activeElement;
             titleEl.textContent = video.title;
             hideFallback();
+            showPlayBtn(false);
             videoEl.setAttribute("aria-label", video.title);
+            // Importante en móvil: play() en el mismo gesto del toque a Acceder.
+            // Esperar loadeddata pierde el gesto y Safari deja la pantalla negra.
             videoEl.src = video.src;
-            syncFsUi();
-            const play = () => {
-                const p = videoEl.play();
-                if (p && typeof p.catch === "function") p.catch(() => {});
-            };
-            videoEl.addEventListener("loadeddata", play, { once: true });
+            videoEl.load();
+            tryPlay();
             videoEl.addEventListener("error", () => showFallback(), { once: true });
+            syncFsUi();
             overlay.hidden = false;
             void overlay.offsetWidth;
             overlay.classList.add("is-open");
             document.body.classList.add("is-player-open");
-            closeBtn.focus();
+            // No robar el foco del gesto en iOS hasta el siguiente tick
+            setTimeout(() => closeBtn.focus(), 0);
         }
 
         function closePlayer() {
@@ -546,9 +611,30 @@
         }
 
         videoEl.addEventListener("click", togglePlay);
+        playBtn.addEventListener("click", e => {
+            e.stopPropagation();
+            tryPlay();
+        });
+        videoEl.addEventListener("playing", () => showPlayBtn(false));
+        videoEl.addEventListener("pause", () => {
+            if (overlay.classList.contains("is-open") && videoEl.currentSrc && !videoEl.ended) {
+                // En móvil, si quedó pausado al abrir, mostrar play; si el usuario pausó a propósito también.
+                showPlayBtn(true);
+            }
+        });
+        videoEl.addEventListener("ended", () => showPlayBtn(true));
         fsBtn.addEventListener("click", toggleFullscreen);
         document.addEventListener("fullscreenchange", syncFsUi);
         document.addEventListener("webkitfullscreenchange", syncFsUi);
+
+        // Precarga suave para que el 2.º video no espere tanto en Render
+        Object.values(VIDEOS).forEach(v => {
+            const link = document.createElement("link");
+            link.rel = "prefetch";
+            link.as = "video";
+            link.href = v.src;
+            document.head.appendChild(link);
+        });
 
         document.querySelectorAll('.hot[data-key]').forEach(a => {
             const key = a.dataset.key;
