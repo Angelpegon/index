@@ -149,7 +149,6 @@
             background: radial-gradient(120% 60% at 50% 50%, rgba(251, 243, 226, .15) 0%, rgba(251, 243, 226, .55) 100%)
         }
 
-        /* ---- Modal player (estética Crece) ---- */
         .player-overlay {
             position: fixed;
             inset: 0;
@@ -246,13 +245,69 @@
             box-shadow: 0 10px 28px rgba(15, 58, 34, .22)
         }
 
-        .player-frame iframe {
+        .player-frame video {
             position: absolute;
             inset: 0;
             width: 100%;
             height: 100%;
+            display: block;
+            object-fit: contain;
+            background: #000;
+            cursor: pointer
+        }
+
+        .player-play {
+            position: absolute;
+            inset: 0;
+            z-index: 2;
+            display: grid;
+            place-items: center;
+            margin: 0;
+            padding: 0;
             border: 0;
-            display: block
+            background: transparent;
+            cursor: pointer
+        }
+
+        .player-play[hidden] {
+            display: none !important
+        }
+
+        .player-play__icon {
+            width: 72px;
+            height: 72px;
+            border-radius: 999px;
+            background: var(--green);
+            border: 3px solid var(--gold);
+            box-shadow: 0 10px 28px rgba(15, 58, 34, .35);
+            display: grid;
+            place-items: center;
+            transition: transform .15s ease, background .15s ease
+        }
+
+        .player-play__icon::before {
+            content: "";
+            width: 0;
+            height: 0;
+            margin-left: 4px;
+            border-style: solid;
+            border-width: 12px 0 12px 20px;
+            border-color: transparent transparent transparent var(--cream)
+        }
+
+        .player-play:hover .player-play__icon,
+        .player-play:focus-visible .player-play__icon {
+            background: #164f30;
+            transform: scale(1.05)
+        }
+
+        .player-play:focus-visible {
+            outline: none
+        }
+
+        .player-play:focus-visible .player-play__icon {
+            outline: 3px solid var(--gold);
+            outline-offset: 3px
         }
 
         .player-fallback {
@@ -280,25 +335,6 @@
             line-height: 1.4
         }
 
-        .player-fallback a {
-            display: inline-flex;
-            align-items: center;
-            justify-content: center;
-            min-height: 44px;
-            padding: 0 18px;
-            border-radius: 999px;
-            background: var(--gold);
-            color: var(--green);
-            font-weight: 700;
-            text-decoration: none;
-            border: 2px solid rgba(241, 217, 143, .9)
-        }
-
-        .player-fallback a:focus-visible {
-            outline: 3px solid var(--cream);
-            outline-offset: 2px
-        }
-
         @media (max-width:700px),
         (max-aspect-ratio:1/1) {
             .poster {
@@ -318,7 +354,8 @@
             .hot,
             .player-overlay,
             .player-panel,
-            .player-close {
+            .player-close,
+            .player-play__icon {
                 transition: none
             }
 
@@ -356,10 +393,12 @@
                 <button type="button" class="player-close" id="player-close" aria-label="Cerrar video">&times;</button>
             </div>
             <div class="player-frame">
-                <iframe id="player-iframe" title="Reproductor de video" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>
+                <video id="player-video" playsinline preload="metadata"></video>
+                <button type="button" class="player-play" id="player-play" hidden aria-label="Reproducir">
+                    <span class="player-play__icon" aria-hidden="true"></span>
+                </button>
                 <div class="player-fallback" id="player-fallback" hidden>
-                    <p>No se pudo cargar el video aquí. Ábrelo en YouTube.</p>
-                    <a id="player-fallback-link" href="#" target="_blank" rel="noopener">Mirar el video en YouTube</a>
+                    <p>No se pudo cargar el video.</p>
                 </div>
             </div>
         </div>
@@ -372,13 +411,14 @@
         const ENLACES = {
             plataforma: "https://crece-en-casa.onrender.com/"
         };
+        /* Archivos locales tal cual (sin reencode). Nombres URL-safe. */
         const VIDEOS = {
             video: {
-                id: "VZ-rRdUJOqU",
+                src: "instructivo.mp4",
                 title: "Video Instructivo"
             },
             jardin: {
-                id: "l4jxutmE_IU",
+                src: "nuestro-jardin.mp4",
                 title: "Nuestro Jardín"
             }
         };
@@ -390,65 +430,54 @@
         const toast = document.getElementById('toast');
         const overlay = document.getElementById('player-overlay');
         const titleEl = document.getElementById('player-title');
-        const frameBox = document.querySelector('.player-frame');
+        const videoEl = document.getElementById('player-video');
+        const playBtn = document.getElementById('player-play');
         const fallback = document.getElementById('player-fallback');
-        const fallbackLink = document.getElementById('player-fallback-link');
         const closeBtn = document.getElementById('player-close');
-        let iframe = document.getElementById('player-iframe');
         let toastTimer;
         let lastFocus = null;
 
-        function canEmbedHere() {
-            const origin = location.origin || "";
-            return /^https?:$/i.test(location.protocol) && origin !== "null";
+        function syncPlayUi() {
+            const show = videoEl.paused || videoEl.ended;
+            playBtn.hidden = !show;
+            playBtn.setAttribute("aria-label", show ? "Reproducir" : "Pausar");
         }
 
-        function watchUrl(id) {
-            return "https://www.youtube.com/watch?v=" + encodeURIComponent(id);
+        function stopVideo() {
+            videoEl.pause();
+            videoEl.removeAttribute("src");
+            videoEl.load();
+            playBtn.hidden = true;
         }
 
-        function embedUrl(id) {
-            const params = new URLSearchParams({
-                rel: "0",
-                modestbranding: "1",
-                playsinline: "1",
-                autoplay: "1"
-            });
-            if (canEmbedHere()) params.set("origin", location.origin);
-            return "https://www.youtube.com/embed/" + encodeURIComponent(id) + "?" + params.toString();
+        function togglePlay() {
+            if (!videoEl.src && !videoEl.currentSrc) return;
+            if (videoEl.paused || videoEl.ended) {
+                const p = videoEl.play();
+                if (p && typeof p.catch === "function") p.catch(() => syncPlayUi());
+            } else {
+                videoEl.pause();
+            }
+            syncPlayUi();
         }
 
-        function resetIframe() {
-            const next = document.createElement("iframe");
-            next.id = "player-iframe";
-            next.title = "Reproductor de video";
-            next.setAttribute("allow", "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share; fullscreen");
-            next.setAttribute("allowfullscreen", "");
-            next.setAttribute("referrerpolicy", "strict-origin-when-cross-origin");
-            next.setAttribute("loading", "lazy");
-            iframe.replaceWith(next);
-            iframe = next;
-        }
-
-        function showFallback(id) {
-            iframe.removeAttribute("src");
-            iframe.src = "about:blank";
-            iframe.style.display = "none";
+        function showFallback() {
+            stopVideo();
+            videoEl.style.display = "none";
+            playBtn.hidden = true;
             fallback.hidden = false;
             fallback.classList.add("is-visible");
-            fallbackLink.href = watchUrl(id);
         }
 
         function hideFallback() {
             fallback.classList.remove("is-visible");
             fallback.hidden = true;
-            iframe.style.display = "block";
-            fallbackLink.href = "#";
+            videoEl.style.display = "block";
         }
 
         function openPlayer(key, trigger) {
             const video = VIDEOS[key];
-            if (!video || !video.id) {
+            if (!video || !video.src) {
                 toast.hidden = false;
                 clearTimeout(toastTimer);
                 toastTimer = setTimeout(() => toast.hidden = true, 2600);
@@ -456,14 +485,20 @@
             }
             lastFocus = trigger || document.activeElement;
             titleEl.textContent = video.title;
-            resetIframe();
             hideFallback();
-            if (!canEmbedHere()) {
-                showFallback(video.id);
-            } else {
-                iframe.title = "Reproductor: " + video.title;
-                iframe.src = embedUrl(video.id);
-            }
+            videoEl.setAttribute("aria-label", video.title);
+            videoEl.src = video.src;
+            playBtn.hidden = true;
+            const play = () => {
+                const p = videoEl.play();
+                if (p && typeof p.catch === "function") {
+                    p.then(syncPlayUi).catch(() => syncPlayUi());
+                } else {
+                    syncPlayUi();
+                }
+            };
+            videoEl.addEventListener("loadeddata", play, { once: true });
+            videoEl.addEventListener("error", () => showFallback(), { once: true });
             overlay.hidden = false;
             void overlay.offsetWidth;
             overlay.classList.add("is-open");
@@ -475,9 +510,8 @@
             if (!overlay.classList.contains("is-open") && overlay.hidden) return;
             overlay.classList.remove("is-open");
             document.body.classList.remove("is-player-open");
+            stopVideo();
             hideFallback();
-            resetIframe();
-            iframe.src = "about:blank";
             const finish = () => {
                 overlay.hidden = true;
                 if (lastFocus && typeof lastFocus.focus === "function") lastFocus.focus();
@@ -489,6 +523,15 @@
                 setTimeout(finish, 250);
             }
         }
+
+        videoEl.addEventListener("click", togglePlay);
+        playBtn.addEventListener("click", e => {
+            e.stopPropagation();
+            togglePlay();
+        });
+        videoEl.addEventListener("play", syncPlayUi);
+        videoEl.addEventListener("pause", syncPlayUi);
+        videoEl.addEventListener("ended", syncPlayUi);
 
         document.querySelectorAll('.hot[data-key]').forEach(a => {
             const key = a.dataset.key;
